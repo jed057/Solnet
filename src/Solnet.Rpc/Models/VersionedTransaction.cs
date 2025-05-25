@@ -1,10 +1,12 @@
-﻿using Solnet.Rpc.Builders;
+﻿
+using Solnet.Rpc.Builders;
 using Solnet.Rpc.Utilities;
+using Solnet.Wallet;
+using Solnet.Wallet.Utilities;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using static Solnet.Rpc.Models.Message;
 
 namespace Solnet.Rpc.Models
@@ -20,21 +22,135 @@ namespace Solnet.Rpc.Models
         /// </summary>
         public List<MessageAddressTableLookup> AddressTableLookups { get; set; }
 
+        /// <summary>
+        /// Signs the transaction's message with the passed list of signers and adds them to the transaction, serializing it.
+        /// </summary>
+        /// <param name="signers">The list of signers.</param>
+        /// <param name="altAccounts">The address lookup tables.</param>
+        /// <returns>The serialized transaction.</returns>
+        public byte[] Build(IList<Account> signers, List<AddressLookupTableState> altAccounts)
+        {
+            Sign(signers, altAccounts);
 
+            return Serialize(null);
+        }
+
+        public byte[] Serialize(List<AddressLookupTableState> altAccounts)
+        {
+            byte[] signaturesLength = ShortVectorEncoding.EncodeLength(Signatures.Count);
+            byte[] serializedMessage = CompileMessage(altAccounts);
+            MemoryStream buffer = new(signaturesLength.Length + Signatures.Count * TransactionBuilder.SignatureLength +
+                                      serializedMessage.Length);
+
+            buffer.Write(signaturesLength);
+            foreach (SignaturePubKeyPair signaturePair in Signatures)
+            {
+                buffer.Write(signaturePair.Signature);
+            }
+
+            buffer.Write(serializedMessage);
+            return buffer.ToArray();
+        }
+        public bool Sign(IList<Account> signers, List<AddressLookupTableState> altAccounts)
+        {
+            Signatures ??= new List<SignaturePubKeyPair>();
+            IEnumerable<Account> uniqueSigners = DeduplicateSigners(signers);
+            byte[] serializedMessage = CompileMessage(altAccounts);
+
+            foreach (Account account in uniqueSigners)
+            {
+                byte[] signatureBytes = account.Sign(serializedMessage);
+                Signatures.Add(new SignaturePubKeyPair { PublicKey = account.PublicKey, Signature = signatureBytes });
+            }
+
+            return VerifySignatures(null);
+        }
+
+        public bool VerifySignatures(List<AddressLookupTableState> altAccounts) => VerifySignatures(CompileMessage(altAccounts));
+        
         /// <summary>
         /// Compile the transaction data.
         /// </summary>
-        public override byte[] CompileMessage()
+        public byte[] CompileMessage(List<AddressLookupTableState> altAccounts)
         {
-            VersionedMessageBuilder messageBuilder = new() { FeePayer = FeePayer, AccountKeys = _accountKeys };
+            VersionedMessageBuilder messageBuilder = new() { FeePayer = FeePayer,
+                //AccountKeys = _accountKeys 
+            };
 
             if (RecentBlockHash != null) messageBuilder.RecentBlockHash = RecentBlockHash;
             if (NonceInformation != null) messageBuilder.NonceInformation = NonceInformation;
 
-            foreach (TransactionInstruction instruction in Instructions)
+            foreach (var instruction in Instructions)
             {
-                messageBuilder.AddInstruction(instruction);
+                messageBuilder.AddInstruction((VersionedTransactionInstruction)instruction);
             }
+
+            // start  alt map
+            if (altAccounts != null)
+            {
+                // step 1: mark writable or readonly for each of ALTs based on keys of each instruction
+                for (int i = 0; i < AddressTableLookups.Count; i++)
+                {
+                    var altAddrs = altAccounts[i].Addresses.Select(i => i.Key).ToList();
+                    
+                    HashSet<int> wIndex = [], rIndex = [];
+                    foreach (var instr in Instructions)
+                    {
+                        foreach (var key in instr.Keys)
+                        {
+                            var ind = altAddrs.IndexOf(key.PublicKey);
+                            if (ind >= 0)
+                            {
+                                if (key.PublicKey == Encoders.Base58.EncodeData(instr.ProgramId) ||
+                                    key.IsSigner)
+                                    continue;
+
+                                if (key.IsWritable)
+                                { wIndex.Add(ind); }
+                                else
+                                { rIndex.Add(ind); }
+                            }
+                        }
+                    }
+                    AddressTableLookups[i].WritableIndexes = wIndex.Order().Select(i => (byte)i).ToArray();
+                    AddressTableLookups[i].ReadonlyIndexes = rIndex.Order().Select(i => (byte)i).ToArray();
+                    
+                }
+
+                // step 2: build full account key list
+                // fee payer + all signers + all program keys + all w/r in alts
+                var fullAccountKeyList = new List<string> { FeePayer };
+                fullAccountKeyList.AddRange(messageBuilder.AccountKeys);
+                for (int i = 0; i < AddressTableLookups.Count; i++)
+                {
+                    foreach (var wind in AddressTableLookups[i].WritableIndexes)
+                    {
+                        fullAccountKeyList.Add(altAccounts[i].Addresses[wind]);
+                    }
+                    foreach (var rind in AddressTableLookups[i].ReadonlyIndexes)
+                    {
+                        fullAccountKeyList.Add(altAccounts[i].Addresses[rind]);
+                    }
+                }
+
+                // step 3: fill out key indices for each instruction based on the full account key list
+                // note: remove all keys in instruction except the signers
+                foreach (var instruction in Instructions)
+                {
+                    var indices = new List<byte>();
+                    var versionedIns = instruction as VersionedTransactionInstruction;
+                    foreach (var key in versionedIns.Keys)
+                    {
+                        var index = fullAccountKeyList.IndexOf(key.PublicKey);
+                        if (index == -1) throw new Exception("index not found");
+                        indices.Add((byte)index);
+                    }
+                    versionedIns.KeyIndices = indices.ToArray();
+
+                    versionedIns.Keys = versionedIns.Keys.Where(i => i.IsSigner).ToArray();
+                }
+            }
+            // end alt map
 
             messageBuilder.AddressTableLookups = AddressTableLookups;
 

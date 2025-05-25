@@ -12,7 +12,7 @@ namespace Solnet.Rpc.Models
         /// <summary>
         /// The keys associated with the instruction.
         /// </summary>
-        public byte[] KeyIndices { get; init; }
+        public byte[] KeyIndices { get; set; }
     }
     /// <summary>
     /// Represents a transaction instruction before being compiled into the transaction's message.
@@ -27,7 +27,7 @@ namespace Solnet.Rpc.Models
         /// <summary>
         /// The keys associated with the instruction.
         /// </summary>
-        public IList<AccountMeta> Keys { get; init; }
+        public IList<AccountMeta> Keys { get; set; }
 
         /// <summary>
         /// The instruction-specific data.

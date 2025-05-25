@@ -105,7 +105,7 @@ namespace Solnet.Rpc.Models
         /// Verifies the signatures a given serialized message.
         /// </summary>
         /// <returns>true if they are valid, false otherwise.</returns>
-        private bool VerifySignatures(byte[] serializedMessage) =>
+        protected bool VerifySignatures(byte[] serializedMessage) =>
             Signatures.All(pair => pair.PublicKey.Verify(serializedMessage, pair.Signature));
 
         /// <summary>
@@ -190,7 +190,7 @@ namespace Solnet.Rpc.Models
         /// </summary>
         /// <param name="signers">The signer accounts.</param>
         /// <returns>The signer accounts with removed duplicates</returns>
-        private static IEnumerable<Account> DeduplicateSigners(IEnumerable<Account> signers)
+        protected static IEnumerable<Account> DeduplicateSigners(IEnumerable<Account> signers)
         {
             List<Account> uniqueSigners = new();
             HashSet<Account> seen = new();
@@ -271,7 +271,7 @@ namespace Solnet.Rpc.Models
         /// Serializes the transaction into wire format.
         /// </summary>
         /// <returns>The transaction encoded in wire format.</returns>
-        public byte[] Serialize()
+        public virtual byte[] Serialize()
         {
             byte[] signaturesLength = ShortVectorEncoding.EncodeLength(Signatures.Count);
             byte[] serializedMessage = CompileMessage();

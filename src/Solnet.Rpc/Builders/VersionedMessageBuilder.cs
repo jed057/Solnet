@@ -23,7 +23,22 @@ namespace Solnet.Rpc.Builders
         /// <summary>
         /// Account Keys
         /// </summary>
-        public IList<PublicKey> AccountKeys { get; internal set; }
+        //public IList<PublicKey> AccountKeys { get; internal set; }
+        public List<string> AccountKeys => _accountKeysList.AccountList.Select(i => i.PublicKey).ToList();
+
+        /// <summary>
+        /// Add an instruction to the message.
+        /// </summary>
+        /// <param name="instruction">The instruction to add to the message.</param>
+        /// <returns>The message builder, so instruction addition can be chained.</returns>
+        internal VersionedMessageBuilder AddInstruction(VersionedTransactionInstruction instruction)
+        {
+            var signers = instruction.Keys.Where(i => i.IsSigner);
+            _accountKeysList.Add(signers);
+            _accountKeysList.Add(AccountMeta.ReadOnly(new PublicKey(instruction.ProgramId), false));
+            Instructions.Add(instruction);
+            return this;
+        }
 
         /// <summary>
         /// Builds the message into the wire format.
