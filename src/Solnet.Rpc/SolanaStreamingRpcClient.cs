@@ -563,6 +563,7 @@ namespace Solnet.Rpc
 
         private string GetUnsubscribeMethodName(SubscriptionChannel channel) => channel switch
         {
+            SubscriptionChannel.TokenAccount => "tokenaccountUnsubscribe",
             SubscriptionChannel.Account => "accountUnsubscribe",
             SubscriptionChannel.Logs => "logsUnsubscribe",
             SubscriptionChannel.Program => "programUnsubscribe",
