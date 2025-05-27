@@ -82,7 +82,10 @@ namespace Solnet.Rpc.Models
 
             foreach (var instruction in Instructions)
             {
-                messageBuilder.AddInstruction((VersionedTransactionInstruction)instruction);
+                if (instruction.GetType() == typeof( VersionedTransactionInstruction))
+                    messageBuilder.AddInstruction((VersionedTransactionInstruction)instruction);
+                else
+                    messageBuilder.AddInstruction(instruction);
             }
 
             // start  alt map
